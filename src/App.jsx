@@ -25,6 +25,8 @@ export default function App() {
   const [notes, setNotes] = useState([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [image, setImage] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   // Watch login state
   useEffect(() => {
@@ -63,13 +65,34 @@ export default function App() {
 
   async function createNote(e) {
     e.preventDefault();
+    setUploading(true);
+
+    let imageUrl = null;
+
+    if (image) {
+      const formData = new FormData();
+      formData.append("file", image);
+      formData.append("upload_preset", "notesapp_unsigned");
+
+      const res = await fetch(
+        "https://api.cloudinary.com/v1_1/grux5ndc/image/upload",
+        { method: "POST", body: formData }
+      );
+      const data = await res.json();
+      imageUrl = data.secure_url;
+    }
+
     await addDoc(collection(db, "notes"), {
       name,
       description,
+      imageUrl,
       ownerId: user.uid,
     });
+
     setName("");
     setDescription("");
+    setImage(null);
+    setUploading(false);
     fetchNotes(user.uid);
   }
 
@@ -131,7 +154,15 @@ export default function App() {
           required
           style={{ display: "block", width: "100%", marginBottom: 10, padding: 8 }}
         />
-        <button type="submit">Create Note</button>
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => setImage(e.target.files[0])}
+          style={{ display: "block", marginBottom: 10 }}
+        />
+        <button type="submit" disabled={uploading}>
+          {uploading ? "Creating..." : "Create Note"}
+        </button>
       </form>
 
       <h2>Current Notes</h2>
@@ -142,6 +173,13 @@ export default function App() {
         >
           <h3>{note.name}</h3>
           <p>{note.description}</p>
+          {note.imageUrl && (
+            <img
+              src={note.imageUrl}
+              alt={note.name}
+              style={{ width: "100%", maxWidth: 300, marginTop: 10 }}
+            />
+          )}
           <button onClick={() => deleteNote(note.id)}>Delete</button>
         </div>
       ))}
