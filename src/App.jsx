@@ -9,6 +9,7 @@ import {
 import {
   collection,
   addDoc,
+  updateDoc,
   deleteDoc,
   doc,
   query,
@@ -28,7 +29,9 @@ export default function App() {
   const [image, setImage] = useState(null);
   const [uploading, setUploading] = useState(false);
 
-  // Watch login state
+  // Tracks which note (if any) is currently being edited
+  const [editingId, setEditingId] = useState(null);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -63,37 +66,62 @@ export default function App() {
     }
   }
 
-  async function createNote(e) {
+  async function uploadImageIfPresent() {
+    if (!image) return null;
+    const formData = new FormData();
+    formData.append("file", image);
+    formData.append("upload_preset", "notesapp_unsigned");
+
+    const res = await fetch(
+      "https://api.cloudinary.com/v1_1/grux5ndc/image/upload",
+      { method: "POST", body: formData }
+    );
+    const data = await res.json();
+    return data.secure_url;
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault();
     setUploading(true);
 
-    let imageUrl = null;
+    const uploadedUrl = await uploadImageIfPresent();
 
-    if (image) {
-      const formData = new FormData();
-      formData.append("file", image);
-      formData.append("upload_preset", "notesapp_unsigned");
-
-      const res = await fetch(
-        "https://api.cloudinary.com/v1_1/grux5ndc/image/upload",
-        { method: "POST", body: formData }
-      );
-      const data = await res.json();
-      imageUrl = data.secure_url;
+    if (editingId) {
+      // --- Update existing note ---
+      const updateData = { name, description };
+      if (uploadedUrl) updateData.imageUrl = uploadedUrl; // only overwrite if a new image was picked
+      await updateDoc(doc(db, "notes", editingId), updateData);
+    } else {
+      // --- Create new note ---
+      await addDoc(collection(db, "notes"), {
+        name,
+        description,
+        imageUrl: uploadedUrl,
+        ownerId: user.uid,
+      });
     }
 
-    await addDoc(collection(db, "notes"), {
-      name,
-      description,
-      imageUrl,
-      ownerId: user.uid,
-    });
+    resetForm();
+    setUploading(false);
+    fetchNotes(user.uid);
+  }
 
+  function startEdit(note) {
+    setEditingId(note.id);
+    setName(note.name);
+    setDescription(note.description);
+    setImage(null); // leave existing image untouched unless a new one is chosen
+  }
+
+  function cancelEdit() {
+    resetForm();
+  }
+
+  function resetForm() {
+    setEditingId(null);
     setName("");
     setDescription("");
     setImage(null);
-    setUploading(false);
-    fetchNotes(user.uid);
   }
 
   async function deleteNote(id) {
@@ -139,7 +167,7 @@ export default function App() {
         Sign Out
       </button>
 
-      <form onSubmit={createNote} style={{ marginBottom: 30 }}>
+      <form onSubmit={handleSubmit} style={{ marginBottom: 30 }}>
         <input
           placeholder="Note Name"
           value={name}
@@ -161,8 +189,13 @@ export default function App() {
           style={{ display: "block", marginBottom: 10 }}
         />
         <button type="submit" disabled={uploading}>
-          {uploading ? "Creating..." : "Create Note"}
+          {uploading ? "Saving..." : editingId ? "Update Note" : "Create Note"}
         </button>
+        {editingId && (
+          <button type="button" onClick={cancelEdit} style={{ marginLeft: 10 }}>
+            Cancel
+          </button>
+        )}
       </form>
 
       <h2>Current Notes</h2>
@@ -180,7 +213,12 @@ export default function App() {
               style={{ width: "100%", maxWidth: 300, marginTop: 10 }}
             />
           )}
-          <button onClick={() => deleteNote(note.id)}>Delete</button>
+          <div style={{ marginTop: 10 }}>
+            <button onClick={() => startEdit(note)} style={{ marginRight: 10 }}>
+              Edit
+            </button>
+            <button onClick={() => deleteNote(note.id)}>Delete</button>
+          </div>
         </div>
       ))}
     </div>
